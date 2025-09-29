@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, ChangeEvent, FormEvent } from 'react';
 import Image from 'next/image';
 import Loader from '@/components/Loader';
 import { AnimatedSection } from '@/hooks/useIntersectionObserver';
@@ -9,6 +9,24 @@ export default function Home() {
   const [isLoading, setIsLoading] = useState(true);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isScrolled, setIsScrolled] = useState(false);
+  const [formData, setFormData] = useState({
+    firstName: '',
+    lastName: '',
+    email: '',
+    phone: '',
+    message: '',
+    marketingOptOut: false,
+  });
+  const [validationErrors, setValidationErrors] = useState<string[]>([]);
+  const [feedback, setFeedback] = useState<
+    | {
+        type: 'success' | 'error';
+        message: string;
+      }
+    | null
+  >(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [captchaToken] = useState<string | null>(null);
 
   useEffect(() => {
     const handleScroll = () => {
@@ -20,10 +38,85 @@ export default function Home() {
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
 
+  const handleInputChange = (
+    event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
+  ) => {
+    const { name, value, type, checked } = event.target;
+    setFormData((prev) => ({
+      ...prev,
+      [name]: type === 'checkbox' ? checked : value,
+    }));
+  };
+
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setValidationErrors([]);
+    setFeedback(null);
+    setIsSubmitting(true);
+
+    try {
+      const response = await fetch('/api/contact', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          ...formData,
+          captchaToken,
+        }),
+      });
+
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        const errors = Array.isArray(data.errors) ? data.errors : undefined;
+        if (errors?.length) {
+          setValidationErrors(errors);
+          setFeedback({
+            type: 'error',
+            message: 'Please review the highlighted issues and try again.',
+          });
+        } else if (data.error) {
+          setFeedback({ type: 'error', message: data.error });
+        } else {
+          setFeedback({
+            type: 'error',
+            message: 'Something went wrong. Please try again later.',
+          });
+        }
+        return;
+      }
+
+      setFeedback({
+        type: 'success',
+        message: 'Thanks for reaching out! We will be in touch soon.',
+      });
+      setFormData({
+        firstName: '',
+        lastName: '',
+        email: '',
+        phone: '',
+        message: '',
+        marketingOptOut: false,
+      });
+    } catch (error) {
+      console.error('Failed to submit contact form', error);
+      setFeedback({
+        type: 'error',
+        message: 'Unable to submit the form right now. Please try again later.',
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   if (isLoading) {
     return <Loader onComplete={() => setIsLoading(false)} />;
-  }  return (
-    <div className="min-h-screen bg-background">      {/* Sticky Header Menu */}
+  }
+
+  return (
+    <div className="min-h-screen bg-background">
+      {/* Sticky Header Menu */}
       <header className={`sticky top-0 z-50 h-[80px] md:h-[106px] transition-all duration-300 ${isScrolled ? 'bg-white/95 backdrop-blur-md shadow-xl' : 'bg-white/90 backdrop-blur-sm shadow-lg'} shadow-black/10`}>
         <div className="w-full h-full flex items-center justify-center px-4 md:px-6">
           <div className="w-full max-w-[1275px] h-full flex items-center justify-between">
@@ -559,13 +652,17 @@ export default function Home() {
               {/* Column 2 - Contact Form */}
               <div className="w-full lg:w-1/2">
                 <div className="bg-white p-6 md:p-8 rounded-2xl shadow-xl border border-gray-200">
-                  <form className="space-y-4 md:space-y-6">
+                  <form className="space-y-4 md:space-y-6" onSubmit={handleSubmit} noValidate>
                     {/* Name Fields - Two Columns */}
                     <div className="grid grid-cols-2 gap-3 md:gap-4">
                       <div>
                         <label className="block text-xs md:text-sm font-medium text-gray-700 mb-1 md:mb-2">Name</label>
                         <input
                           type="text"
+                          name="firstName"
+                          value={formData.firstName}
+                          onChange={handleInputChange}
+                          required
                           placeholder="John"
                           className="w-full px-3 md:px-4 py-2 md:py-3 rounded-xl md:rounded-2xl border border-gray-400 focus:border-gray-600 focus:outline-none transition-colors text-sm md:text-base"
                         />
@@ -574,68 +671,115 @@ export default function Home() {
                         <label className="block text-xs md:text-sm font-medium text-gray-700 mb-1 md:mb-2">&nbsp;</label>
                         <input
                           type="text"
+                          name="lastName"
+                          value={formData.lastName}
+                          onChange={handleInputChange}
                           placeholder="Doe"
                           className="w-full px-3 md:px-4 py-2 md:py-3 rounded-xl md:rounded-2xl border border-gray-400 focus:border-gray-600 focus:outline-none transition-colors text-sm md:text-base"
                         />
                       </div>
                     </div>
-                    
+
                     {/* Email Field */}
                     <div>
                       <label className="block text-xs md:text-sm font-medium text-gray-700 mb-1 md:mb-2">Email</label>
                       <input
                         type="email"
+                        name="email"
+                        value={formData.email}
+                        onChange={handleInputChange}
+                        required
+                        autoComplete="email"
                         placeholder="johndoe@example.com"
                         className="w-full px-3 md:px-4 py-2 md:py-3 rounded-xl md:rounded-2xl border border-gray-400 focus:border-gray-600 focus:outline-none transition-colors text-sm md:text-base"
                       />
                     </div>
-                    
+
                     {/* Contact Number Field */}
                     <div>
                       <label className="block text-xs md:text-sm font-medium text-gray-700 mb-1 md:mb-2">Contact No.</label>
                       <input
                         type="tel"
+                        name="phone"
+                        value={formData.phone}
+                        onChange={handleInputChange}
+                        autoComplete="tel"
+                        inputMode="tel"
                         className="w-full px-3 md:px-4 py-2 md:py-3 rounded-xl md:rounded-2xl border border-gray-400 focus:border-gray-600 focus:outline-none transition-colors text-sm md:text-base"
                       />
                     </div>
-                    
+
                     {/* Message Textarea */}
                     <div>
                       <label className="block text-xs md:text-sm font-medium text-gray-700 mb-1 md:mb-2">Need help? Let us know your preferences.</label>
                       <textarea
                         rows={4}
+                        name="message"
+                        value={formData.message}
+                        onChange={handleInputChange}
+                        required
                         className="w-full px-3 md:px-4 py-2 md:py-3 rounded-xl md:rounded-2xl border border-gray-400 focus:border-gray-600 focus:outline-none transition-colors resize-vertical text-sm md:text-base"
                       ></textarea>
                     </div>
-                    
+
                     {/* Checkbox */}
                     <div className="flex items-start space-x-3">
                       <input
                         type="checkbox"
                         id="email-preference"
+                        name="marketingOptOut"
+                        checked={formData.marketingOptOut}
+                        onChange={handleInputChange}
                         className="mt-1 w-4 h-4 text-blue-600 border-gray-400 rounded focus:ring-blue-500"
                       />
-                      <label 
-                        htmlFor="email-preference" 
+                      <label
+                        htmlFor="email-preference"
                         className="font-[family-name:var(--font-poppins)] font-normal text-gray-600 leading-relaxed text-xs md:text-sm"
                       >
                         I prefer not to receive emails from Nadalabs about product updates, promotions, marketing tips, or related news. If I don&apos;t check this box, I understand I&apos;ll be automatically subscribed.
                       </label>
                     </div>
-                    
+
                     {/* Submit Button */}
                     <div className="pt-3 md:pt-4">
-                      <button 
+                      <button
                         type="submit"
+                        disabled={isSubmitting}
                         className="cursor-pointer font-[family-name:var(--font-figtree)] w-full rounded-full py-2.5 md:py-3 transition-colors hover:opacity-90 text-sm md:text-base"
                         style={{
                           backgroundColor: "var(--brand-yellow)",
                           color: "#000"
                         }}
                       >
-                        Let&apos;s Talk
+                        {isSubmitting ? 'Sending…' : 'Let\u2019s Talk'}
                       </button>
                     </div>
+
+                    {(feedback || validationErrors.length > 0) && (
+                      <div className="space-y-3" aria-live="polite" aria-atomic="true">
+                        {feedback && (
+                          <div
+                            className={`rounded-xl border px-4 py-3 text-sm md:text-base ${
+                              feedback.type === 'success'
+                                ? 'border-green-200 bg-green-50 text-green-800'
+                                : 'border-red-200 bg-red-50 text-red-800'
+                            }`}
+                          >
+                            {feedback.message}
+                          </div>
+                        )}
+
+                        {validationErrors.length > 0 && (
+                          <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm md:text-base text-red-800">
+                            <ul className="list-disc space-y-1 pl-5">
+                              {validationErrors.map((error) => (
+                                <li key={error}>{error}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </form>
                 </div>
               </div>
