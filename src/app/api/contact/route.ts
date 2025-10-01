@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import SibApiV3Sdk from 'sib-api-v3-sdk';
+import { TransactionalEmailsApi, SendSmtpEmail } from '@getbrevo/brevo';
 
 export const runtime = 'nodejs';
 
@@ -14,7 +14,6 @@ type RateLimitEntry = {
 type RateLimitStore = Map<string, RateLimitEntry>;
 
 declare global {
-  // eslint-disable-next-line no-var
   var __contactRateLimitStore: RateLimitStore | undefined;
 }
 
@@ -34,7 +33,8 @@ function getClientIdentifier(request: NextRequest): string {
     return realIp;
   }
 
-  return request.ip ?? 'unknown';
+  // In edge runtime, request.ip is not available, so we use headers or fallback
+  return 'unknown';
 }
 
 function isRateLimited(identifier: string): boolean {
@@ -175,10 +175,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Email service not configured.' }, { status: 500 });
   }
 
-  const apiClient = SibApiV3Sdk.ApiClient.instance;
-  const apiKeyAuth = apiClient.authentications['api-key'] as { apiKey?: string };
-  apiKeyAuth.apiKey = smtpPass;
-  const transactionalEmailsApi = new SibApiV3Sdk.TransactionalEmailsApi();
+  const transactionalEmailsApi = new TransactionalEmailsApi();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (transactionalEmailsApi as any).authentications.apiKey.apiKey = smtpPass;
 
   const trimmedEmail = payload.email?.trim() ?? '';
   const trimmedPhone = payload.phone?.trim();
@@ -195,32 +194,33 @@ export async function POST(request: NextRequest) {
   const safeMessage = escapeHtml(trimmedMessage);
 
   try {
-    await transactionalEmailsApi.sendTransacEmail({
-      sender: {
-        name: normalizedDisplayName,
-        email: smtpUser,
+    const message = new SendSmtpEmail();
+    message.sender = {
+      name: normalizedDisplayName,
+      email: smtpUser,
+    };
+    message.to = [
+      {
+        email: contactRecipient,
       },
-      to: [
-        {
-          email: contactRecipient,
-        },
-      ],
-      replyTo: trimmedEmail
-        ? {
-            email: trimmedEmail,
-          }
-        : undefined,
-      subject: `New contact form submission from ${normalizedDisplayName}`,
-      textContent: `Name: ${displayName}\nEmail: ${trimmedEmail || 'N/A'}\nPhone: ${trimmedPhone ?? 'N/A'}\nMarketing Opt Out: ${payload.marketingOptOut ? 'Yes' : 'No'}\n\nMessage:\n${trimmedMessage}`,
-      htmlContent: `
+    ];
+    if (trimmedEmail) {
+      message.replyTo = {
+        email: trimmedEmail,
+      };
+    }
+    message.subject = `New contact form submission from ${normalizedDisplayName}`;
+    message.textContent = `Name: ${displayName}\nEmail: ${trimmedEmail || 'N/A'}\nPhone: ${trimmedPhone ?? 'N/A'}\nMarketing Opt Out: ${payload.marketingOptOut ? 'Yes' : 'No'}\n\nMessage:\n${trimmedMessage}`;
+    message.htmlContent = `
         <p><strong>Name:</strong> ${safeDisplayName}</p>
         <p><strong>Email:</strong> ${safeEmail}</p>
         <p><strong>Phone:</strong> ${safePhone}</p>
         <p><strong>Marketing Opt Out:</strong> ${payload.marketingOptOut ? 'Yes' : 'No'}</p>
         <p><strong>Message:</strong></p>
         <p>${safeMessage.replace(/\n/g, '<br />')}</p>
-      `,
-    });
+      `;
+
+    await transactionalEmailsApi.sendTransacEmail(message);
 
     return NextResponse.json({ success: true });
   } catch (error) {
